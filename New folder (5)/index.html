@@ -1,0 +1,1428 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="dark" />
+    <link rel="icon" href="data:," />
+    <title>SumScribble</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --paper: #fdfdf7;
+        --paper-card: #fffef9;
+        --ink: #23408c;
+        --ink-soft: #5b6fa6;
+        --ink-faint: #9db0d8;
+        --accent: #3d8b2f;
+        --accent-dark: #2f6d24;
+        --accent-soft: #e7f4db;
+        --danger: #cf3f38;
+        --danger-soft: #fbe7e3;
+        --gold: #e07b24;
+        --tile-blue: #d3e6fb;
+        --sticky-1: #fff3a0;
+        --sticky-2: #ffec8a;
+        --green-paper: #a9dc8f;
+        --peach-paper: #ffd9a0;
+        --shadow: 0 2px 0 rgba(35, 64, 140, 0.18);
+        --shadow-lg: 0 4px 0 rgba(35, 64, 140, 0.18);
+        --lift: drop-shadow(0 3px 0 rgba(35, 64, 140, 0.22));
+        --lift-sm: drop-shadow(0 1px 0 rgba(35, 64, 140, 0.22));
+        --sketch: 255px 15px 225px 15px / 15px 225px 15px 255px;
+        --sketch-2: 15px 225px 15px 255px / 225px 15px 255px 15px;
+        --sketch-3: 225px 20px 255px 18px / 18px 255px 20px 225px;
+        --cutout: polygon(3% 7%, 14% 2%, 32% 4%, 52% 1%, 71% 4%, 88% 2%, 97% 6%, 100% 26%, 98% 52%, 100% 78%, 96% 94%, 80% 98%, 58% 100%, 36% 97%, 16% 100%, 4% 96%, 0% 76%, 2% 48%, 0% 24%);
+        /* Tile height scales with viewport height so the whole game
+           fits one screen — no scrolling at phone sizes. */
+        --tile-h: clamp(40px, 6.9vh, 60px);
+      }
+
+      * { box-sizing: border-box; }
+      button { touch-action: manipulation; }
+      button:focus-visible { outline: 3px solid #ffb84d; outline-offset: 3px; }
+      html, body { height: 100%; overflow: hidden; }
+      body {
+        margin: 0;
+        color: var(--ink);
+        font-family: "Trebuchet MS", Arial, sans-serif;
+        background-color: var(--paper);
+        background-image:
+          url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='0.05'/%3E%3C/svg%3E"),
+          linear-gradient(rgba(70, 110, 190, 0.16) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(70, 110, 190, 0.16) 1px, transparent 1px),
+          linear-gradient(rgba(70, 110, 190, 0.08) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(70, 110, 190, 0.08) 1px, transparent 1px);
+        background-size: 140px 140px, 130px 130px, 130px 130px, 26px 26px, 26px 26px;
+        -webkit-tap-highlight-color: transparent;
+      }
+
+      .app {
+        position: relative;
+        z-index: 1;
+        max-width: 460px;
+        margin: 0 auto;
+        height: 100vh;
+        height: 100dvh;
+        max-height: 100dvh;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+        padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+        gap: clamp(6px, 1.1vh, 14px);
+      }
+
+      /* ---------- Falling background (rain canvas) ---------- */
+      .bg-drift {
+        position: fixed;
+        inset: 0;
+        overflow: hidden;
+        pointer-events: none;
+        z-index: 0;
+      }
+      .bg-drift canvas {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        display: block;
+      }
+      .bg-vignette {
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        z-index: 0;
+        background: radial-gradient(ellipse 90% 75% at 50% 42%, transparent 58%, rgba(35, 64, 140, 0.10) 100%);
+      }
+
+      /* ---------- Top bar ---------- */
+      .topbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+      }
+      .round-label {
+        font-family: "Trebuchet MS", Arial, sans-serif;
+        font-size: 17px;
+        font-weight: 400;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--ink-soft);
+      }
+      .streak {
+        font-family: "Trebuchet MS", Arial, sans-serif;
+        font-size: 17px;
+        font-weight: 400;
+        color: var(--gold);
+        min-height: 1em;
+      }
+      .tries {
+        font-family: "Trebuchet MS", Arial, sans-serif;
+        font-size: 17px;
+        font-weight: 400;
+        color: var(--danger);
+        min-height: 1em;
+      }
+
+      /* ---------- Sound + layout buttons ---------- */
+      .sound-btn, .layout-btn {
+        border: 2px solid var(--ink-soft);
+        background: var(--paper-card);
+        border-radius: var(--sketch-2);
+        font-family: "Trebuchet MS", Arial, sans-serif;
+        font-size: 16px;
+        line-height: 1;
+        padding: 6px 9px;
+        cursor: pointer;
+        box-shadow: var(--shadow);
+        color: var(--ink);
+        white-space: nowrap;
+      }
+      .sound-btn:active, .layout-btn:active { transform: translateY(2px); box-shadow: none; }
+
+      /* ---------- Title banner (Layout A only) ---------- */
+      .title-banner { display: none; }
+
+      /* ---------- Stage line ---------- */
+      .stage-line {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 6px 10px;
+        margin-top: -8px;
+      }
+      .stage-chip {
+        font-size: 15px;
+        padding: 3px 12px 4px;
+        border: 2px solid var(--ink);
+        border-radius: var(--sketch-3);
+        background: linear-gradient(180deg, var(--sticky-1), var(--sticky-2));
+        transform: rotate(-1deg);
+        white-space: nowrap;
+        box-shadow: var(--shadow);
+      }
+      .stage-hint {
+        font-size: 16px;
+        color: var(--ink-soft);
+      }
+      .pips {
+        margin-left: auto;
+        font-size: 14px;
+        color: var(--ink-soft);
+        white-space: nowrap;
+      }
+      .pips .dots {
+        color: var(--gold);
+        letter-spacing: 2px;
+      }
+
+      /* ---------- Gate / target ---------- */
+      .gate {
+        position: relative;
+        background: var(--paper-card);
+        border: 2.5px solid var(--ink);
+        border-radius: var(--sketch);
+        padding: clamp(12px, 2.4vh, 22px) 16px clamp(10px, 2vh, 18px);
+        text-align: center;
+        box-shadow: var(--shadow);
+        transform: rotate(-0.3deg);
+        transition: border-color 0.25s, background 0.25s;
+      }
+      .gate.open {
+        border-color: var(--accent);
+        background: var(--accent-soft);
+      }
+
+      /* ---------- Confetti celebration ---------- */
+      .confetti {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+      }
+      .confetti i {
+        position: absolute;
+        top: 58%;
+        width: 9px;
+        height: 13px;
+        border-radius: 2px;
+        opacity: 0;
+        animation: confettiPop 1.15s ease-out forwards;
+      }
+      @keyframes confettiPop {
+        0% { opacity: 1; transform: translate(0, 0) rotate(0deg); }
+        100% { opacity: 0; transform: translate(var(--dx), calc(var(--dy) + 200px)) rotate(var(--rot)); }
+      }
+
+      .gate-icon {
+        width: 46px;
+        height: 46px;
+        margin: 0 auto 6px;
+        display: grid;
+        place-items: center;
+        border: 2px solid var(--ink-soft);
+        border-radius: var(--sketch-2);
+        background: transparent;
+        color: var(--ink-soft);
+        transition: background 0.25s, color 0.25s, border-color 0.25s;
+      }
+      .gate.open .gate-icon {
+        background: var(--accent);
+        border-color: var(--accent-dark);
+        color: #fff;
+      }
+      .gate-icon svg { width: 24px; height: 24px; }
+      .gate-icon .icon-open { display: none; }
+      .gate.open .gate-icon .icon-open { display: block; }
+      .gate.open .gate-icon .icon-locked { display: none; }
+      .gate-label {
+        font-size: 14px;
+        font-weight: 400;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--ink-soft);
+      }
+      .gate-target {
+        font-family: "Trebuchet MS", Arial, sans-serif;
+        font-size: clamp(38px, 8.4vh, 78px);
+        font-weight: 700;
+        line-height: 1.05;
+      }
+
+      /* ---------- Equation slots ---------- */
+      .equation {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: clamp(3px, 1.5vw, 8px);
+      }
+      .slot {
+        width: 64px;
+        height: clamp(48px, 8.2vh, 72px);
+        border-radius: var(--sketch-2);
+        border: 2.5px dashed var(--ink-faint);
+        background: transparent;
+        font-family: "Trebuchet MS", Arial, sans-serif;
+        font-size: 34px;
+        font-weight: 400;
+        color: var(--ink);
+        display: grid;
+        place-items: center;
+        cursor: pointer;
+        padding: 0;
+        transition: border-color 0.15s, background 0.15s, transform 0.1s;
+      }
+      .slot.filled {
+        border-style: solid;
+        border-color: var(--ink);
+        background: var(--paper-card);
+        box-shadow: var(--shadow);
+      }
+      .slot.filled:active { transform: scale(0.94); }
+      .slot.op-slot { width: 52px; font-size: 30px; border-radius: var(--sketch-3); }
+      .slot.extra { display: none; }
+      .equation.three .slot.extra { display: grid; }
+      .equation.three .slot { width: 52px; height: clamp(42px, 7.4vh, 62px); font-size: 27px; }
+      .equation.three .slot.op-slot { width: 44px; font-size: 24px; }
+      .slot.next {
+        border-color: var(--ink);
+      }
+      .eq-sign {
+        font-family: "Trebuchet MS", Arial, sans-serif;
+        font-size: 32px;
+        font-weight: 400;
+        color: var(--ink-soft);
+      }
+      .eq-result {
+        font-family: "Trebuchet MS", Arial, sans-serif;
+        font-size: 32px;
+        font-weight: 400;
+        min-width: 44px;
+        text-align: center;
+      }
+      .eq-result.good { color: var(--accent); }
+      .eq-result.bad { color: var(--danger); }
+
+      @keyframes shake {
+        0%, 100% { transform: translateX(0); }
+        20% { transform: translateX(-8px); }
+        40% { transform: translateX(8px); }
+        60% { transform: translateX(-6px); }
+        80% { transform: translateX(6px); }
+      }
+      .equation.shaking { animation: shake 0.4s ease; }
+
+      /* ---------- Message ---------- */
+      .message {
+        min-height: clamp(20px, 3.2vh, 28px);
+        text-align: center;
+        font-family: "Trebuchet MS", Arial, sans-serif;
+        font-size: clamp(19px, 2.9vh, 24px);
+        font-weight: 600;
+      }
+      .message.good { color: var(--accent); }
+      .message.bad { color: var(--danger); }
+
+      /* ---------- Tile tray ---------- */
+      .tray-wrap { margin-top: auto; }
+      .tray-label {
+        font-size: 14px;
+        font-weight: 400;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: var(--ink-soft);
+        text-align: center;
+        margin-bottom: clamp(3px, 0.9vh, 9px);
+      }
+      .tray {
+        display: flex;
+        flex-direction: column;
+        gap: clamp(6px, 1.2vh, 9px);
+      }
+      .tray-nums {
+        display: flex;
+        flex-direction: column;
+        gap: clamp(6px, 1.2vh, 9px);
+      }
+      .tray-row {
+        display: flex;
+        justify-content: center;
+        gap: 8px;
+      }
+      .app > * { flex-shrink: 0; }
+      .tray-row .tile {
+        flex: 1 1 0;
+        min-width: 0;
+        max-width: 66px;
+        padding: 0 4px;
+        font-size: 26px;
+      }
+      .tray-ops {
+        display: flex;
+        justify-content: center;
+        flex-wrap: wrap;
+        gap: 9px;
+        margin-top: 4px;
+        padding-top: clamp(7px, 1.5vh, 13px);
+        border-top: 2px dashed var(--ink-faint);
+      }
+      .tile {
+        min-width: 56px;
+        height: var(--tile-h);
+        padding: 0 10px;
+        border: none;
+        border-radius: 4px;
+        clip-path: var(--cutout);
+        background: var(--tile-blue);
+        color: var(--ink);
+        font-family: "Trebuchet MS", Arial, sans-serif;
+        font-size: 27px;
+        font-weight: 400;
+        cursor: pointer;
+        filter: var(--lift);
+        transition: transform 0.08s, opacity 0.15s, filter 0.08s;
+      }
+      .tile:nth-child(odd) { transform: rotate(-1.4deg); }
+      .tile:nth-child(even) { transform: rotate(1.1deg); }
+      .tile:active { transform: translateY(3px) rotate(0deg); filter: var(--lift-sm); }
+      .tile.op {
+        background: linear-gradient(180deg, var(--sticky-1), var(--sticky-2));
+        min-width: 48px;
+        transform: rotate(-2.4deg);
+      }
+      .tile.op:active { transform: translateY(3px) rotate(0deg); }
+      .tile.used {
+        opacity: 0.25;
+        pointer-events: none;
+        filter: none;
+      }
+
+      /* ---------- Actions ---------- */
+      .actions { display: flex; gap: 10px; }
+      .btn {
+        flex: 1;
+        height: clamp(42px, 6.6vh, 56px);
+        border: none;
+        border-radius: 4px;
+        clip-path: var(--cutout);
+        font-family: "Trebuchet MS", Arial, sans-serif;
+        font-size: 21px;
+        font-weight: 400;
+        cursor: pointer;
+        filter: var(--lift);
+        transition: transform 0.08s, opacity 0.15s, filter 0.08s;
+      }
+      .btn:active { transform: translateY(3px); filter: var(--lift-sm); }
+      .btn-check {
+        background: var(--green-paper);
+        color: #274d16;
+      }
+      .btn-check:disabled { opacity: 0.4; filter: none; cursor: default; }
+      .btn-clear {
+        flex: 0 0 110px;
+        background: #e8eefb;
+        color: var(--ink-soft);
+      }
+      @media (max-width: 400px) {
+        .slot { width: 56px; height: clamp(46px, 8.2vh, 64px); font-size: 30px; }
+        .slot.op-slot { width: 48px; }
+        .equation.three .slot { width: 45px; height: clamp(40px, 7.4vh, 56px); font-size: 23px; }
+        .equation.three .slot.op-slot { width: 38px; font-size: 21px; }
+        .gate-target { font-size: clamp(36px, 8.4vh, 64px); }
+        .eq-result { min-width: 34px; font-size: 27px; }
+      }
+
+      /* ================================================================
+         LAYOUT A — "Midnight Neon": dark navy night sky, glowing
+         number rain, torn-paper cards and pastel tiles on top.
+         ================================================================ */
+      body.layout-a {
+        --tile-h: clamp(40px, 6.8vh, 60px);
+        background-color: #0a1531;
+        background-image:
+          radial-gradient(ellipse 90% 46% at 50% -8%, rgba(70, 120, 255, 0.38), transparent 70%),
+          radial-gradient(ellipse 60% 34% at 88% 108%, rgba(255, 110, 180, 0.16), transparent 70%),
+          radial-gradient(ellipse 55% 30% at 8% 104%, rgba(60, 220, 190, 0.12), transparent 70%),
+          url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='0.05'/%3E%3C/svg%3E");
+        background-size: auto, auto, auto, 140px 140px;
+        color: #eaf1ff;
+      }
+      body.layout-a .bg-vignette {
+        background: radial-gradient(ellipse 92% 78% at 50% 42%, transparent 55%, rgba(2, 6, 20, 0.5) 100%);
+      }
+      body.layout-a .round-label { display: none; }
+      body.layout-a .tries { color: #ff9d94; }
+      body.layout-a .streak { color: #ffb84d; }
+      body.layout-a .sound-btn, body.layout-a .layout-btn {
+        background: rgba(16, 32, 74, 0.85);
+        border-color: rgba(190, 208, 255, 0.55);
+        color: #dbe6ff;
+        box-shadow: 0 2px 0 rgba(0, 0, 0, 0.45);
+      }
+
+      /* Torn-paper title banner + taped round/stage chip */
+      body.layout-a .title-banner {
+        display: block;
+        text-align: center;
+        margin-top: -4px;
+      }
+      body.layout-a .title-card {
+        display: inline-block;
+        background: #fdf6df;
+        color: var(--ink);
+        font-family: "Trebuchet MS", Arial, sans-serif;
+        font-size: clamp(27px, 4.9vh, 40px);
+        font-weight: 700;
+        line-height: 1.1;
+        padding: clamp(5px, 1vh, 8px) 28px clamp(7px, 1.4vh, 12px);
+        clip-path: var(--cutout);
+        filter: drop-shadow(0 4px 0 rgba(0, 0, 0, 0.4));
+        transform: rotate(-0.6deg);
+      }
+      body.layout-a .title-chip {
+        display: inline-block;
+        margin-top: clamp(5px, 1.2vh, 10px);
+        background: linear-gradient(180deg, var(--sticky-1), var(--sticky-2));
+        color: var(--ink);
+        font-size: 16px;
+        padding: 4px 16px 5px;
+        border-radius: 3px;
+        clip-path: var(--cutout);
+        filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.4));
+        transform: rotate(0.8deg);
+        white-space: nowrap;
+      }
+
+      /* Stage line on the dark sky: no chip (the title chip covers it) */
+      body.layout-a .stage-line { margin-top: -6px; }
+      body.layout-a .stage-chip { display: none; }
+      body.layout-a .stage-hint { color: #aebfff; }
+      body.layout-a .pips { color: #aebfff; }
+      body.layout-a .pips .dots { color: #ffb84d; }
+
+      /* Target card: torn paper with a tape strip on top */
+      body.layout-a .gate {
+        border: none;
+        border-radius: var(--sketch);
+        background: #fdf6df;
+        color: var(--ink);
+        box-shadow: 0 6px 0 rgba(0, 0, 0, 0.35);
+      }
+      body.layout-a .gate::before {
+        content: "";
+        position: absolute;
+        top: -11px;
+        left: 50%;
+        transform: translateX(-50%) rotate(-2deg);
+        width: 92px;
+        height: 24px;
+        background: rgba(140, 200, 245, 0.75);
+        border-left: 2px dashed rgba(35, 64, 140, 0.25);
+        border-right: 2px dashed rgba(35, 64, 140, 0.25);
+      }
+      body.layout-a .gate.open { background: var(--accent-soft); }
+      body.layout-a .gate-label { letter-spacing: 0.1em; }
+      body.layout-a .gate-icon { display: none; }
+      body.layout-a .gate { padding-top: clamp(12px, 2.2vh, 20px); }
+
+      /* Equation bar: torn paper strip */
+      body.layout-a .equation {
+        background: #fdf6df;
+        color: var(--ink);
+        border-radius: var(--sketch-3);
+        padding: clamp(8px, 1.6vh, 14px) 8px;
+        box-shadow: 0 5px 0 rgba(0, 0, 0, 0.35);
+      }
+      body.layout-a .slot.filled { background: #fffef9; }
+
+      body.layout-a .message { color: #eaf1ff; }
+      body.layout-a .message.good { color: #8be08b; }
+      body.layout-a .message.bad { color: #ff9d94; }
+      body.layout-a .tray-label { color: #aebfff; }
+
+      /* Tiles on paper panels */
+      body.layout-a .tray-nums {
+        background: #fdf6df;
+        border-radius: var(--sketch);
+        padding: clamp(8px, 1.6vh, 13px) 12px;
+        box-shadow: 0 5px 0 rgba(0, 0, 0, 0.35);
+      }
+      body.layout-a .tray-ops {
+        background: #fdf6df;
+        border-radius: var(--sketch-2);
+        border-top: none;
+        margin-top: 2px;
+        padding: clamp(7px, 1.4vh, 11px) 12px;
+        box-shadow: 0 5px 0 rgba(0, 0, 0, 0.35);
+      }
+      body.layout-a .tile {
+        clip-path: none;
+        border-radius: 9px;
+        filter: none;
+        box-shadow: 0 3px 0 rgba(35, 64, 140, 0.35);
+      }
+      body.layout-a .tile:active { transform: translateY(3px) rotate(0deg); box-shadow: none; }
+      body.layout-a .tile.c0 { background: #ffc7d6; }
+      body.layout-a .tile.c1 { background: #bfe0ff; }
+      body.layout-a .tile.c2 { background: #ffe79a; }
+      body.layout-a .tile.c3 { background: #c2f0c8; }
+      body.layout-a .tile.c4 { background: #e2ccff; }
+      body.layout-a .tile.op { min-width: 72px; height: clamp(36px, 6vh, 54px); font-size: 30px; }
+      body.layout-a .tile.used { box-shadow: none; }
+
+      /* Big pills */
+      body.layout-a .btn {
+        clip-path: none;
+        border-radius: 999px;
+        height: clamp(42px, 6.4vh, 58px);
+        font-size: 23px;
+        filter: none;
+        box-shadow: 0 4px 0 rgba(0, 0, 0, 0.45);
+      }
+      body.layout-a .btn:active { transform: translateY(3px); box-shadow: 0 1px 0 rgba(0, 0, 0, 0.45); }
+      body.layout-a .btn-clear {
+        flex: 1;
+        background: #ccd4e4;
+        color: var(--ink);
+      }
+      body.layout-a .btn-check {
+        background: #ffd94d;
+        color: var(--ink);
+      }
+      body.layout-a .btn-check:disabled { opacity: 0.4; box-shadow: none; }
+
+      /* ---------- Compact mode: short viewports (small phones) ----------
+         Decorative breathing room goes first — smaller banner, tighter
+         gate, no tray label — so every gameplay element stays on screen
+         with zero scrolling even at 320×568. */
+      @media (max-height: 700px) {
+        .app { gap: 6px; padding-top: 8px; padding-bottom: 8px; }
+        .tray-label { display: none; }
+        .gate { padding-top: 10px; padding-bottom: 8px; }
+        body.layout-a .gate { padding-top: 10px; }
+        .gate-target { font-size: 42px; }
+        .gate-icon { width: 34px; height: 34px; margin-bottom: 2px; }
+        .gate-icon svg { width: 18px; height: 18px; }
+        body.layout-a { --tile-h: 40px; }
+        body.layout-a .title-card { font-size: 26px; padding: 4px 20px 6px; }
+        body.layout-a .title-chip { margin-top: 4px; font-size: 14px; }
+        body.layout-a .equation { padding-top: 8px; padding-bottom: 8px; }
+        body.layout-a .tray-nums { padding: 8px 10px; }
+        body.layout-a .tray-ops { padding: 8px 10px; }
+        .slot { height: 46px; }
+        .equation.three .slot { height: 42px; }
+        .message { min-height: 18px; font-size: 18px; }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .equation.shaking { animation: none; }
+        * { transition: none !important; }
+      }
+      @media (max-width: 360px) {
+        .app { padding-left: 10px; padding-right: 10px; }
+        .equation.three .slot { width: 40px; }
+        .equation.three .slot.op-slot { width: 30px; }
+        .equation.three .eq-result { min-width: 28px; font-size: 23px; }
+      }
+      @media (max-height: 700px) {
+        .app { gap: 6px; }
+        body.layout-a .gate { padding-top: 10px; padding-bottom: 10px; }
+        .gate-icon { width: 32px; height: 32px; }
+        body.layout-a .title-card { font-size: 27px; }
+      }
+    </style>
+  </head>
+  <body class="layout-a">
+    <div class="bg-drift" aria-hidden="true">
+      <canvas id="rainCanvas"></canvas>
+    </div>
+    <div class="bg-vignette" aria-hidden="true"></div>
+    <main class="app">
+      <div class="topbar">
+        <button class="sound-btn" id="newGameBtn">New game</button>
+        <div class="round-label" id="roundLabel">Round 1</div>
+        <div class="tries" id="triesLabel"></div>
+        <div class="streak" id="streakLabel"></div>
+        <button class="sound-btn" id="soundBtn" aria-label="Turn sound off">🔊</button>
+      </div>
+
+      <div class="title-banner" aria-hidden="true">
+        <div class="title-card">SumScribble</div>
+        <br />
+        <div class="title-chip" id="titleChip">Round 1 · Stage 1</div>
+      </div>
+
+      <div class="stage-line">
+        <span class="stage-chip" id="stageChip">Stage 1 · Addition</span>
+        <span class="stage-hint" id="stageHint">Numbers 1–10</span>
+        <span class="pips" id="pips"></span>
+      </div>
+
+      <section class="gate" id="gate">
+        <div class="gate-icon" aria-hidden="true">
+          <svg class="icon-locked" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
+          <svg class="icon-open" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.5-2"/></svg>
+        </div>
+        <div class="gate-label">Target Number</div>
+        <div class="gate-target" id="targetDisplay">24</div>
+      </section>
+
+      <div class="equation" id="equation">
+        <button class="slot" id="slotA" aria-label="First number slot"></button>
+        <button class="slot op-slot" id="slotOp" aria-label="Operator slot"></button>
+        <button class="slot" id="slotB" aria-label="Second number slot"></button>
+        <button class="slot op-slot extra" id="slotOp2" aria-label="Second operator slot"></button>
+        <button class="slot extra" id="slotC" aria-label="Third number slot"></button>
+        <span class="eq-sign">=</span>
+        <span class="eq-result" id="eqResult">?</span>
+      </div>
+
+      <div class="message" id="message" role="status"></div>
+
+      <div class="tray-wrap">
+        <div class="tray-label">Your tiles — tap to place, tap a slot to remove</div>
+        <div class="tray" id="tray">
+          <div class="tray-nums" id="trayNums">
+            <div class="tray-row" id="trayRow1"></div>
+            <div class="tray-row" id="trayRow2"></div>
+          </div>
+          <div class="tray-ops" id="trayOps"></div>
+        </div>
+      </div>
+
+      <div class="actions">
+        <button class="btn btn-clear" id="clearBtn">Clear</button>
+        <button class="btn btn-check" id="checkBtn" disabled>Check</button>
+      </div>
+    </main>
+
+    <script>
+      (function () {
+        var OPS = [
+          { sym: "+", fn: function (a, b) { return a + b; } },
+          { sym: "−", fn: function (a, b) { return a - b; } },
+          { sym: "×", fn: function (a, b) { return a * b; } },
+          { sym: "÷", fn: function (a, b) { return a / b; } }
+        ];
+
+        /* ---- Difficulty ladder ----
+           Stage 1 (rounds 1–3):   addition only, numbers 1–10
+           Stage 2 (rounds 4–6):   multiplication enters, 2–5 times tables
+           Stage 3 (rounds 7–10):  multiplication up to 10 × 10, numbers to 50
+           Stage 4 (rounds 11–15): subtraction joins, +/−/× mixed, numbers to 100
+           Stage 5 (rounds 16–20): division joins (clean divisions only,
+                                   built backwards from a whole-number answer),
+                                   numbers up to 150
+           Stage 6 (rounds 21+):   three-number equations, worked left to right,
+                                   numbers up to 150
+           The round bands are the default pace; first-try streaks can promote
+           the player a stage early. Wrong answers never change the stage —
+           the player just retries the same puzzle until it clicks. */
+        var STAGES = [
+          { name: "Addition", hint: "Numbers 1–10" },
+          { name: "Times tables", hint: "× starts here · 2–5 tables" },
+          { name: "Big multiplication", hint: "× up to 10 × 10 · numbers to 50" },
+          { name: "Add, subtract & multiply", hint: "+, −, × mixed · numbers to 100" },
+          { name: "Division", hint: "Clean divisions · numbers to 150" },
+          { name: "Three numbers", hint: "Two operations, like 4 × 3 + 2" }
+        ];
+        var PROMOTE_AFTER = 3;   // first-try solves in a row that earn a level-up
+
+        var round = 1;
+        var streak = 0;
+        var stage = 1;              // stage of the puzzle on screen
+        var firstTryRun = 0;        // consecutive puzzles solved on the first try
+        var promotionPending = false;
+        var attempts = 0;           // wrong checks on the current puzzle
+        var target = 0;
+        var three = false;          // current puzzle uses three numbers
+        var solved = false;
+        var activePuzzle = null, savedNumbers = [], savedOps = [];
+        var advanceTimer = null;
+        var SAVE_KEY = "sumscribble-save-v1";
+        var slots = { a: null, op: null, b: null, op2: null, c: null }; // each: {value|sym, tileId}
+
+        var els = {
+          round: document.getElementById("roundLabel"),
+          tries: document.getElementById("triesLabel"),
+          streak: document.getElementById("streakLabel"),
+          chip: document.getElementById("stageChip"),
+          hint: document.getElementById("stageHint"),
+          pips: document.getElementById("pips"),
+          titleChip: document.getElementById("titleChip"),
+          gate: document.getElementById("gate"),
+          target: document.getElementById("targetDisplay"),
+          equation: document.getElementById("equation"),
+          slotA: document.getElementById("slotA"),
+          slotOp: document.getElementById("slotOp"),
+          slotB: document.getElementById("slotB"),
+          slotOp2: document.getElementById("slotOp2"),
+          slotC: document.getElementById("slotC"),
+          result: document.getElementById("eqResult"),
+          message: document.getElementById("message"),
+          tray: document.getElementById("tray"),
+          nums: document.getElementById("trayNums"),
+          row1: document.getElementById("trayRow1"),
+          row2: document.getElementById("trayRow2"),
+          opsRow: document.getElementById("trayOps"),
+          check: document.getElementById("checkBtn"),
+          clear: document.getElementById("clearBtn"),
+          sound: document.getElementById("soundBtn")
+        };
+
+        /* ---- Sound: all synthesized with WebAudio, no audio files.
+           The context is created/resumed on the first user tap, which is
+           what mobile browsers require before any sound can play. ---- */
+        var audioCtx = null;
+        var soundOn = true;
+        try { soundOn = window.localStorage.getItem("sumscribble-sound") !== "off"; } catch (e) {}
+        syncSound();
+
+        function ensureAudio() {
+          if (audioCtx) {
+            if (audioCtx.state === "suspended") audioCtx.resume().catch(function () {});
+            return;
+          }
+          var AC = window.AudioContext || window.webkitAudioContext;
+          if (AC) {
+            try { audioCtx = new AC(); } catch (e) { audioCtx = null; }
+          }
+        }
+
+        function tone(freqA, freqB, dur, type, vol, delay) {
+          if (!soundOn) return;
+          ensureAudio();
+          if (!audioCtx) return;
+          var t0 = audioCtx.currentTime + (delay || 0);
+          var osc = audioCtx.createOscillator();
+          var gain = audioCtx.createGain();
+          osc.type = type;
+          osc.frequency.setValueAtTime(freqA, t0);
+          if (freqB) osc.frequency.exponentialRampToValueAtTime(freqB, t0 + dur);
+          gain.gain.setValueAtTime(vol, t0);
+          gain.gain.exponentialRampToValueAtTime(0.001, t0 + dur);
+          osc.connect(gain);
+          gain.connect(audioCtx.destination);
+          osc.start(t0);
+          osc.stop(t0 + dur + 0.02);
+        }
+
+        function playTap() { tone(660, 330, 0.06, "triangle", 0.15, 0); }
+        function playThud() { tone(130, 55, 0.2, "sine", 0.25, 0); }
+
+        function playFanfare() {
+          var notes = [523.25, 659.25, 783.99, 1046.5];
+          for (var i = 0; i < notes.length; i++) {
+            tone(notes[i], null, i === notes.length - 1 ? 0.35 : 0.16, "triangle", 0.2, i * 0.09);
+          }
+          tone(1318.5, null, 0.3, "sine", 0.1, 0.38);
+        }
+
+        /* Correct-answer celebration: fanfare plus a burst of paper
+           confetti over the gate. Reduced-motion skips the confetti;
+           the fanfare still plays. */
+        function celebrate() {
+          playFanfare();
+          if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+          var colors = ["#d3e6fb", "#fff3a0", "#a9dc8f", "#ffd9a0", "#f6c6d8"];
+          var layer = document.createElement("div");
+          layer.className = "confetti";
+          layer.setAttribute("aria-hidden", "true");
+          for (var i = 0; i < 28; i++) {
+            var piece = document.createElement("i");
+            piece.style.background = colors[i % colors.length];
+            piece.style.left = (35 + Math.random() * 30) + "%";
+            piece.style.setProperty("--dx", (Math.random() * 240 - 120).toFixed(0) + "px");
+            piece.style.setProperty("--dy", (Math.random() * -140 - 30).toFixed(0) + "px");
+            piece.style.setProperty("--rot", (Math.random() * 540 - 270).toFixed(0) + "deg");
+            piece.style.animationDelay = (Math.random() * 0.12).toFixed(2) + "s";
+            layer.appendChild(piece);
+          }
+          els.gate.appendChild(layer);
+          setTimeout(function () { layer.remove(); }, 1500);
+        }
+
+        function rand(min, max) {
+          return Math.floor(Math.random() * (max - min + 1)) + min;
+        }
+
+        function pick(arr) {
+          return arr[Math.floor(Math.random() * arr.length)];
+        }
+
+        function shuffle(arr) {
+          for (var i = arr.length - 1; i > 0; i--) {
+            var j = Math.floor(Math.random() * (i + 1));
+            var t = arr[i]; arr[i] = arr[j]; arr[j] = t;
+          }
+          return arr;
+        }
+
+        function baseStageFor(r) {
+          if (r <= 3) return 1;
+          if (r <= 6) return 2;
+          if (r <= 10) return 3;
+          if (r <= 15) return 4;
+          if (r <= 20) return 5;
+          return 6;
+        }
+
+        function makeDecoys(count, max, exclude, near) {
+          var out = [];
+          var pool = shuffle((near || []).slice());
+          for (var i = 0; i < pool.length && out.length < count; i++) {
+            var v = pool[i];
+            if (v >= 1 && v <= max && exclude.indexOf(v) === -1 && out.indexOf(v) === -1) out.push(v);
+          }
+          var guard = 0;
+          while (out.length < count && guard < 80) {
+            guard++;
+            var d = rand(1, max);
+            if (exclude.indexOf(d) === -1 && out.indexOf(d) === -1) out.push(d);
+          }
+          // Complete the tray even if random sampling repeatedly hits used values.
+          for (var candidate = 1; out.length < count && candidate <= max; candidate++) {
+            if (exclude.indexOf(candidate) === -1 && out.indexOf(candidate) === -1) out.push(candidate);
+          }
+          return out;
+        }
+
+        function genPuzzle(st) {
+          var nums, opIdxs, opSet, dMax, dCount = 3, near = [];
+          if (st === 1) {
+            var a1 = rand(1, 10), b1 = rand(1, 10);
+            nums = [a1, b1];
+            opIdxs = [0]; opSet = [0]; dMax = 10; dCount = 8;
+            // Near-miss decoys: one or two away from the real operands, so
+            // swapping one in lands just off the target.
+            near = [a1 - 1, a1 + 1, a1 - 2, a1 + 2, b1 - 1, b1 + 1, b1 - 2, b1 + 2];
+          } else if (st === 2) {
+            // Multiplication enters: 2–5 times tables only.
+            var a2 = rand(2, 5), b2 = rand(2, 5);
+            nums = [a2, b2]; opIdxs = [2]; opSet = [0, 2]; dMax = 10; dCount = 8;
+            near = [a2 - 1, a2 + 1, a2 - 2, a2 + 2, b2 - 1, b2 + 1, b2 - 2, b2 + 2];
+          } else if (st === 3) {
+            // Multiplication up to 10 × 10, with some bigger additions mixed in.
+            if (Math.random() < 0.7) {
+              var a3 = rand(2, 10), b3 = rand(2, 10);
+              nums = [a3, b3]; opIdxs = [2]; dMax = 12;
+              near = [a3 - 1, a3 + 1, a3 - 2, a3 + 2, b3 - 1, b3 + 1, b3 - 2, b3 + 2];
+            } else {
+              var a3b = rand(5, 50), b3b = rand(5, 50);
+              nums = [a3b, b3b]; opIdxs = [0]; dMax = 50;
+              near = [a3b - 1, a3b + 1, a3b - 5, a3b + 5, b3b - 1, b3b + 1, b3b - 5, b3b + 5];
+            }
+            opSet = [0, 2]; dCount = 8;
+          } else if (st === 4 || st === 5) {
+            // Stage 4 adds subtraction (answers stay positive), numbers to 100.
+            // Stage 5 adds division, numbers to 150.
+            var cap = st === 4 ? 100 : 150;
+            var oi45 = st === 4 ? pick([0, 1, 2, 2]) : pick([0, 1, 2, 3, 3]);
+            var a45, b45;
+            if (oi45 === 3) {
+              // Division, built backwards from a whole-number answer so it
+              // always comes out clean (144 ÷ 12 = 12, never 100 ÷ 7).
+              var divisor = rand(2, 12);
+              var quotient = rand(2, 12);
+              a45 = divisor * quotient; b45 = divisor;
+              // Near-misses: one times-table step either side of the dividend
+              // (quotient off by one), the divisor ±1, and the answer itself.
+              near = [a45 - divisor, a45 + divisor,
+                      divisor - 1, divisor + 1, quotient - 1, quotient + 1];
+              dMax = cap;
+            } else if (oi45 === 2) {
+              if (Math.random() < 0.35) { a45 = rand(11, 25); b45 = rand(2, 5); }
+              else { a45 = rand(2, 12); b45 = rand(2, 12); }
+              near = [a45 - 1, a45 + 1, a45 - 2, a45 + 2, b45 - 1, b45 + 1, b45 - 2, b45 + 2];
+              dMax = 25;
+            } else if (oi45 === 1) {
+              a45 = rand(20, cap); b45 = rand(2, a45 - 1);
+              near = [a45 - 1, a45 + 1, a45 - 10, a45 + 10, b45 - 1, b45 + 1, b45 - 10, b45 + 10];
+              dMax = cap;
+            } else {
+              a45 = rand(10, Math.floor(cap * 0.6)); b45 = rand(5, Math.floor(cap * 0.6));
+              near = [a45 - 1, a45 + 1, a45 - 10, a45 + 10, b45 - 1, b45 + 1, b45 - 10, b45 + 10];
+              dMax = cap;
+            }
+            nums = [a45, b45]; opIdxs = [oi45];
+            opSet = st === 4 ? [0, 1, 2] : [0, 1, 2, 3];
+            dCount = 8;
+          } else {
+            // Stage 6: three numbers, two operations, worked left to right,
+            // numbers up to 150.
+            var o1 = pick([0, 1, 2, 2]);
+            var a6, b6;
+            if (o1 === 2) { a6 = rand(2, 9); b6 = rand(2, 9); }
+            else if (o1 === 1) { a6 = rand(10, 90); b6 = rand(2, a6 - 2); }
+            else { a6 = rand(5, 60); b6 = rand(5, 60); }
+            var step = OPS[o1].fn(a6, b6);
+            var o2, c6;
+            if (step >= 4 && Math.random() < 0.5) { o2 = 1; c6 = rand(1, Math.min(40, step - 1)); }
+            else { o2 = 0; c6 = rand(2, 25); }
+            nums = [a6, b6, c6]; opIdxs = [o1, o2]; opSet = [0, 1, 2]; dMax = 150;
+            dCount = 7;
+            near = [a6 - 1, a6 + 1, b6 - 1, b6 + 1, c6 - 1, c6 + 1, a6 - 10, b6 - 10, c6 - 10];
+            return {
+              three: true, nums: nums, opSet: opSet,
+              target: OPS[o2].fn(step, c6),
+              decoys: makeDecoys(dCount, dMax, nums, near)
+            };
+          }
+          return {
+            three: false, nums: nums, opSet: opSet,
+            target: OPS[opIdxs[0]].fn(nums[0], nums[1]),
+            decoys: makeDecoys(dCount, dMax, nums, near)
+          };
+        }
+
+        function makeTileBtn(t) {
+          var btn = document.createElement("button");
+          btn.className = "tile" + (t.kind === "op" ? " op" : "") + (t.cls ? " " + t.cls : "");
+          btn.textContent = t.label;
+          btn.dataset.tileId = t.id;
+          btn.addEventListener("click", function () { playTap(); placeTile(t, btn); });
+          return btn;
+        }
+
+        function startRound(notice, restored) {
+          clearTimeout(advanceTimer);
+          advanceTimer = null;
+          attempts = 0;
+          solved = false;
+          slots = { a: null, op: null, b: null, op2: null, c: null };
+
+          var p = restored ? restored.puzzle : genPuzzle(stage);
+          activePuzzle = p;
+          three = p.three;
+          target = p.target;
+
+          // Number tiles fill two rows of their own; the operator tiles
+          // get a separate dedicated row underneath them. Each tile also
+          // carries a pastel color class (c0–c4) that only Layout A's
+          // neon theme paints — Layout B keeps its blue paper cutouts.
+          savedNumbers = restored ? restored.numbers.slice() : shuffle(p.nums.concat(p.decoys));
+          var numTiles = savedNumbers.map(function (n, i) {
+            return { id: "n" + i, kind: "num", value: n, label: String(n), cls: "c" + (i % 5) };
+          });
+          var opIdxs = p.opSet.slice();
+          if (three) opIdxs = opIdxs.concat(opIdxs); // a second copy of each operator
+          savedOps = restored ? restored.ops.slice() : shuffle(opIdxs);
+          var opTiles = savedOps.map(function (oi, i) {
+            return { id: "o" + i, kind: "op", sym: OPS[oi].sym, label: OPS[oi].sym, cls: "c" + ((i + 1) % 5) };
+          });
+
+          els.row1.innerHTML = "";
+          els.row2.innerHTML = "";
+          els.opsRow.innerHTML = "";
+          var half = Math.ceil(numTiles.length / 2);
+          numTiles.forEach(function (t, i) {
+            (i < half ? els.row1 : els.row2).appendChild(makeTileBtn(t));
+          });
+          opTiles.forEach(function (t) {
+            els.opsRow.appendChild(makeTileBtn(t));
+          });
+
+          if (restored) {
+            attempts = restored.attempts;
+            slots = restored.slots;
+            Object.keys(slots).forEach(function (k) {
+              if (slots[k]) {
+                var button = els.tray.querySelector('[data-tile-id="' + slots[k].tileId + '"]');
+                if (button) button.classList.add("used");
+              }
+            });
+          }
+          els.equation.classList.toggle("three", three);
+          els.gate.classList.remove("open");
+          els.target.textContent = target;
+          els.round.textContent = "Round " + round;
+          els.message.textContent = notice || (three
+            ? "Build " + target + " with three numbers — work left to right."
+            : "Build an equation that makes " + target + ".");
+          els.message.className = "message";
+          els.check.style.display = "";
+          els.clear.style.display = "";
+          render();
+        }
+
+        function advance() {
+          clearTimeout(advanceTimer);
+          advanceTimer = null;
+          round++;
+          var nextStage = Math.max(stage, baseStageFor(round));
+          if (promotionPending) nextStage = Math.max(nextStage, Math.min(STAGES.length, stage + 1));
+          var leveled = nextStage > stage;
+          stage = nextStage;
+          promotionPending = false;
+          if (leveled) firstTryRun = 0;
+          startRound(leveled ? "Level up! " + STAGES[stage - 1].name + "." : null);
+        }
+
+        function placeTile(tile, btn) {
+          if (solved || btn.classList.contains("used")) return;
+          if (tile.kind === "num") {
+            if (!slots.a) slots.a = { value: tile.value, tileId: tile.id };
+            else if (!slots.b) slots.b = { value: tile.value, tileId: tile.id };
+            else if (three && !slots.c) slots.c = { value: tile.value, tileId: tile.id };
+            else return;
+          } else {
+            if (!slots.op) slots.op = { sym: tile.sym, tileId: tile.id };
+            else if (three && !slots.op2) slots.op2 = { sym: tile.sym, tileId: tile.id };
+            else return;
+          }
+          btn.classList.add("used");
+          render();
+        }
+
+        function clearSlot(key) {
+          if (solved || !slots[key]) return;
+          var tileId = slots[key].tileId;
+          slots[key] = null;
+          var btn = els.tray.querySelector('[data-tile-id="' + tileId + '"]');
+          if (btn) btn.classList.remove("used");
+          render();
+        }
+
+        function clearAll() {
+          if (solved) return;
+          ["a", "op", "b", "op2", "c"].forEach(function (k) {
+            if (slots[k]) {
+              var btn = els.tray.querySelector('[data-tile-id="' + slots[k].tileId + '"]');
+              if (btn) btn.classList.remove("used");
+              slots[k] = null;
+            }
+          });
+          render();
+        }
+
+        function opFn(sym) {
+          for (var i = 0; i < OPS.length; i++) if (OPS[i].sym === sym) return OPS[i].fn;
+          return null;
+        }
+
+        function currentValue() {
+          if (!slots.a || !slots.op || !slots.b) return null;
+          var step = opFn(slots.op.sym)(slots.a.value, slots.b.value);
+          if (!three) return step;
+          if (!slots.op2 || !slots.c) return null;
+          return opFn(slots.op2.sym)(step, slots.c.value);
+        }
+
+        function updateStageLine() {
+          var s = STAGES[stage - 1];
+          els.chip.textContent = "Stage " + stage + " · " + s.name;
+          els.hint.textContent = s.hint;
+          els.titleChip.textContent = "Round " + round + " · Stage " + stage;
+          if (stage >= STAGES.length || promotionPending) {
+            els.pips.innerHTML = "";
+          } else {
+            var dots = "";
+            for (var i = 0; i < PROMOTE_AFTER; i++) dots += i < firstTryRun ? "●" : "○";
+            els.pips.innerHTML = "First-try <span class=\"dots\">" + dots + "</span> to level up";
+          }
+          els.tries.textContent = attempts > 0 ? "Try " + (attempts + 1) : "";
+        }
+
+        function render() {
+          els.slotA.textContent = slots.a ? slots.a.value : "";
+          els.slotOp.textContent = slots.op ? slots.op.sym : "";
+          els.slotB.textContent = slots.b ? slots.b.value : "";
+          els.slotOp2.textContent = slots.op2 ? slots.op2.sym : "";
+          els.slotC.textContent = slots.c ? slots.c.value : "";
+          els.slotA.classList.toggle("filled", !!slots.a);
+          els.slotOp.classList.toggle("filled", !!slots.op);
+          els.slotB.classList.toggle("filled", !!slots.b);
+          els.slotOp2.classList.toggle("filled", !!slots.op2);
+          els.slotC.classList.toggle("filled", !!slots.c);
+          els.slotA.classList.toggle("next", !solved && !slots.a);
+          els.slotOp.classList.toggle("next", !solved && !!slots.a && !slots.op);
+          els.slotB.classList.toggle("next", !solved && !!slots.op && !slots.b);
+          els.slotOp2.classList.toggle("next", !solved && three && !!slots.b && !slots.op2);
+          els.slotC.classList.toggle("next", !solved && three && !!slots.op2 && !slots.c);
+
+          var v = currentValue();
+          // Never reveal the running total before Check: the readout stays
+          // "?" while building, and only shows the value once the gate opens.
+          els.result.textContent = solved && v !== null ? v : "?";
+          els.result.className = "eq-result" + (solved ? " good" : "");
+          els.check.disabled = v === null || solved;
+          els.streak.textContent = streak > 1 ? "🔥 " + streak + " streak" : "";
+          updateStageLine();
+          saveProgress();
+        }
+
+        function check() {
+          var v = currentValue();
+          if (v === null || solved) return;
+          playTap();
+          if (v === target) {
+            solved = true;
+            streak++;
+            var leveledUp = false;
+            if (attempts === 0) {
+              firstTryRun++;
+              if (firstTryRun >= PROMOTE_AFTER && stage < STAGES.length) {
+                promotionPending = true;
+                firstTryRun = 0;
+                leveledUp = true;
+              }
+            }
+            els.gate.classList.add("open");
+            if (leveledUp) els.message.textContent = "Gate open — first try! Three in a row earns a level up next round! ⭐";
+            else if (attempts === 0) els.message.textContent = "Gate open! First try! 🎉";
+            else els.message.textContent = "Gate open! Nice work. 🎉";
+            els.message.className = "message good";
+            els.check.style.display = "none";
+            els.clear.style.display = "none";
+            celebrate();
+            render();
+            // No Next button: hold the open gate briefly, then auto-advance.
+            advanceTimer = setTimeout(function () { if (!document.hidden) advance(); }, 1200);
+          } else {
+            attempts++;
+            firstTryRun = 0;
+            streak = 0;
+            playThud();
+            els.message.textContent = "That's " + v + " — not " + target + ". Try again!";
+            els.message.className = "message bad";
+            els.equation.classList.remove("shaking");
+            void els.equation.offsetWidth; // restart the animation
+            els.equation.classList.add("shaking");
+            render();
+            els.result.className = "eq-result bad";
+          }
+        }
+
+        els.slotA.addEventListener("click", function () { playTap(); clearSlot("a"); });
+        els.slotOp.addEventListener("click", function () { playTap(); clearSlot("op"); });
+        els.slotB.addEventListener("click", function () { playTap(); clearSlot("b"); });
+        els.slotOp2.addEventListener("click", function () { playTap(); clearSlot("op2"); });
+        els.slotC.addEventListener("click", function () { playTap(); clearSlot("c"); });
+        els.check.addEventListener("click", check);
+        els.clear.addEventListener("click", function () { playTap(); clearAll(); });
+        els.sound.addEventListener("click", function () {
+          soundOn = !soundOn;
+          syncSound();
+          try { window.localStorage.setItem("sumscribble-sound", soundOn ? "on" : "off"); } catch (e) {}
+          if (soundOn) playTap();
+        });
+        document.addEventListener("pointerdown", ensureAudio);
+
+        function syncSound() {
+          els.sound.textContent = soundOn ? "🔊" : "🔇";
+          els.sound.setAttribute("aria-label", soundOn ? "Turn sound off" : "Turn sound on");
+          els.sound.setAttribute("aria-pressed", String(soundOn));
+        }
+
+        function saveProgress() {
+          if (!activePuzzle) return;
+          try { window.localStorage.setItem(SAVE_KEY, JSON.stringify({
+            version: 1, round: round, stage: stage, streak: streak,
+            firstTryRun: firstTryRun, promotionPending: promotionPending,
+            attempts: attempts, solved: solved, puzzle: activePuzzle,
+            numbers: savedNumbers, ops: savedOps, slots: slots
+          })); } catch (e) {}
+        }
+
+        function readProgress() {
+          try {
+            var s = JSON.parse(window.localStorage.getItem(SAVE_KEY));
+            var integer = function (v, min, max) { return Number.isInteger(v) && v >= min && v <= max; };
+            if (!s || s.version !== 1 || !integer(s.round, 1, 1000000000) ||
+                !integer(s.stage, 1, 6) || !integer(s.streak, 0, s.round) ||
+                !integer(s.firstTryRun, 0, 1000000000) || !integer(s.attempts, 0, 1000000000) ||
+                typeof s.solved !== "boolean" || typeof s.promotionPending !== "boolean") return null;
+            var p = s.puzzle;
+            if (!p || p.three !== (s.stage === 6) || !integer(p.target, 1, 1000) ||
+                !Array.isArray(p.nums) || p.nums.length !== (p.three ? 3 : 2) ||
+                !Array.isArray(p.decoys) || p.decoys.length > 8 ||
+                !p.nums.concat(p.decoys).every(function (n) { return integer(n, 1, 150); })) return null;
+            var expectedOps = s.stage === 1 ? [0] : s.stage <= 3 ? [0, 2] : s.stage === 5 ? [0, 1, 2, 3] : [0, 1, 2];
+            if (JSON.stringify(p.opSet) !== JSON.stringify(expectedOps)) return null;
+            var sameBag = function (x, y) { return Array.isArray(x) && JSON.stringify(x.slice().sort()) === JSON.stringify(y.slice().sort()); };
+            if (!sameBag(s.numbers, p.nums.concat(p.decoys)) || !sameBag(s.ops, p.three ? expectedOps.concat(expectedOps) : expectedOps) || !s.slots) return null;
+            var used = [], valid = true, clean = {};
+            ["a", "op", "b", "op2", "c"].forEach(function (key) {
+              var slot = s.slots[key];
+              clean[key] = null;
+              if (slot === null) return;
+              if (!slot || typeof slot.tileId !== "string" || used.indexOf(slot.tileId) !== -1 || (!p.three && (key === "op2" || key === "c"))) { valid = false; return; }
+              var isOp = key === "op" || key === "op2";
+              var m = slot.tileId.match(isOp ? /^o(\d+)$/ : /^n(\d+)$/);
+              var idx = m ? Number(m[1]) : -1;
+              if (idx < 0 || idx >= (isOp ? s.ops.length : s.numbers.length)) { valid = false; return; }
+              clean[key] = isOp ? {sym: OPS[s.ops[idx]].sym, tileId: slot.tileId} : {value: s.numbers[idx], tileId: slot.tileId};
+              used.push(slot.tileId);
+            });
+            if (!valid) return null;
+            s.slots = clean;
+            return s;
+          } catch (e) { return null; }
+        }
+
+        document.getElementById("newGameBtn").addEventListener("click", function () {
+          if (!window.confirm("Start a new game? Your current progress will be reset.")) return;
+          round = 1; stage = 1; streak = 0; firstTryRun = 0; promotionPending = false;
+          startRound(null);
+        });
+        document.addEventListener("visibilitychange", function () {
+          saveProgress();
+          if (document.hidden) {
+            clearTimeout(advanceTimer);
+            if (audioCtx && audioCtx.state === "running") audioCtx.suspend().catch(function () {});
+          } else if (solved) {
+            clearTimeout(advanceTimer);
+            advanceTimer = setTimeout(advance, 700);
+          }
+        });
+        window.addEventListener("pagehide", saveProgress);
+        var saved = readProgress();
+        if (saved) {
+          round = saved.round; stage = saved.stage; streak = saved.streak;
+          firstTryRun = saved.firstTryRun; promotionPending = saved.promotionPending;
+          if (saved.solved) advance();
+          else startRound(null, saved);
+        } else startRound(null);
+      })();
+
+    </script>
+    <script>
+      /* ---- Background rain: numbers, symbols and short equations
+         falling in vertical columns at different speeds, Matrix-style.
+         Two themes share the engine: Layout A paints glowing neon
+         glyphs (pink/blue/yellow/green/purple) on the dark sky;
+         Layout B paints faint ink-blue handwriting on graph paper.
+         Pure decoration: pointer-events none, behind the game, and
+         drawn as one static frame when reduced motion is preferred.
+         window.rainSetTheme(true|false) switches themes live. ---- */
+      (function () {
+        var canvas = document.getElementById("rainCanvas");
+        if (!canvas) return;
+        var ctx = canvas.getContext("2d");
+        var reduced = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        var GLYPHS = "0123456789+−×÷=";
+        var EQUATIONS = ["3+4=7", "12−7=5", "5×6=30", "8÷2=4", "9+5=14", "√9=3", "7²=49", "15÷3=5", "6+8=14", "20−9=11", "4×3=12", "π≈3.14", "18÷6=3", "2+9=11", "11−4=7", "3×7=21"];
+        var NEON = [
+          [255, 126, 182],  /* pink */
+          [110, 195, 255],  /* blue */
+          [255, 217, 77],   /* yellow */
+          [126, 224, 138],  /* green */
+          [195, 155, 255]   /* purple */
+        ];
+        var dark = document.body.classList.contains("layout-a");
+        var W = 0, H = 0, cols = [];
+
+        function makeStream(len) {
+          var s = "", i;
+          if (Math.random() < 0.45) {
+            while (s.length < len) s += EQUATIONS[Math.floor(Math.random() * EQUATIONS.length)];
+          } else {
+            for (i = 0; i < len; i++) s += GLYPHS[Math.floor(Math.random() * GLYPHS.length)];
+          }
+          return s;
+        }
+
+        function build() {
+          var dpr = Math.min(window.devicePixelRatio || 1, 2);
+          W = window.innerWidth;
+          H = window.innerHeight;
+          canvas.width = Math.round(W * dpr);
+          canvas.height = Math.round(H * dpr);
+          ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+          var count = Math.max(10, Math.floor(W / 64));
+          cols = [];
+          for (var i = 0; i < count; i++) {
+            cols.push({
+              x: ((i + 0.5) / count) * W + (Math.random() * 30 - 15),
+              cell: 26 + Math.random() * 14,
+              trail: 9 + Math.floor(Math.random() * 7),
+              speed: 26 + Math.random() * 55,
+              head: Math.random() * (H + 500) - 250,
+              stream: makeStream(64),
+              idx: Math.floor(Math.random() * 40),
+              alpha: 0.05 + Math.random() * 0.06,
+              color: NEON[Math.floor(Math.random() * NEON.length)],
+              rot: (Math.random() * 6 - 3) * Math.PI / 180
+            });
+          }
+        }
+
+        function drawCol(c) {
+          ctx.save();
+          ctx.translate(c.x, 0);
+          ctx.rotate(c.rot);
+          ctx.font = "600 " + Math.round(c.cell * 0.92) + "px Arial, sans-serif";
+          ctx.textAlign = "center";
+          for (var k = 0; k < c.trail; k++) {
+            var y = c.head - k * c.cell;
+            if (y < -c.cell || y > H + c.cell) continue;
+            var fade = 1 - k / c.trail;
+            var ch = c.stream[(c.idx + k) % c.stream.length];
+            if (dark) {
+              var a = 0.30 * fade * fade;
+              if (k === 0) {
+                a = 0.62;
+                ctx.shadowColor = "rgba(" + c.color[0] + ", " + c.color[1] + ", " + c.color[2] + ", 0.9)";
+                ctx.shadowBlur = 14;
+              } else {
+                ctx.shadowBlur = 0;
+              }
+              ctx.fillStyle = "rgba(" + c.color[0] + ", " + c.color[1] + ", " + c.color[2] + ", " + a.toFixed(3) + ")";
+            } else {
+              var ai = c.alpha * fade * fade;
+              if (k === 0) ai = Math.min(0.17, c.alpha * 1.9);
+              ctx.shadowBlur = 0;
+              ctx.fillStyle = "rgba(35, 64, 140, " + ai.toFixed(3) + ")";
+            }
+            ctx.fillText(ch, 0, y);
+          }
+          ctx.restore();
+        }
+
+        function frame() {
+          ctx.clearRect(0, 0, W, H);
+          for (var i = 0; i < cols.length; i++) drawCol(cols[i]);
+        }
+
+        var last = 0;
+        function tick(ts) {
+          var dt = Math.min(0.05, last ? (ts - last) / 1000 : 0.016);
+          last = ts;
+          for (var i = 0; i < cols.length; i++) {
+            var c = cols[i];
+            c.head += c.speed * dt;
+            if (c.head - c.trail * c.cell > H + 40) {
+              c.head = -Math.random() * 220;
+              c.idx = Math.floor(Math.random() * 40);
+              c.stream = makeStream(64);
+            }
+          }
+          frame();
+          requestAnimationFrame(tick);
+        }
+
+        var resizeTimer = null;
+        window.addEventListener("resize", function () {
+          clearTimeout(resizeTimer);
+          resizeTimer = setTimeout(function () { build(); if (reduced) frame(); }, 180);
+        });
+
+        window.rainSetTheme = function (isDark) {
+          if (isDark === dark) return;
+          dark = isDark;
+          build();
+          if (reduced) frame();
+        };
+
+        build();
+        if (reduced) {
+          // One still frame: columns frozen mid-fall, no motion.
+          frame();
+          if (document.fonts && document.fonts.ready) document.fonts.ready.then(frame);
+        } else {
+          requestAnimationFrame(tick);
+        }
+      })();
+    </script>
+  </body>
+</html>
